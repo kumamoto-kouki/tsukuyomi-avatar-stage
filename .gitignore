@@ -1,0 +1,25 @@
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Temp / cache
+*.tmp
+*.bak
+*.log
+__pycache__/
+node_modules/
+.venv/
+
+# Large render outputs (keep folder structure via .gitkeep)
+output/**/*.mp4
+output/**/*.mov
+output/**/*.mkv
+output/**/*.avi
+output/**/*.wav
+output/**/*.flac
