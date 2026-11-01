@@ -22,8 +22,16 @@ public class SingingStage : MonoBehaviour
     [Range(0f, 1f)] public float mouthSmoothing = 0.5f;
 
     [Header("体の揺れ")]
-    public float swayDegrees = 4f;
+    public float swayDegrees = 3f;
     public float swaySpeed = 1.6f;
+    [Tooltip("T ポーズから腕を下ろす角度")]
+    public float armDownDegrees = 70f;
+
+    [Header("見た目")]
+    [Tooltip("ディレクショナルライトの明るさ（白飛びするなら下げる）")]
+    public float lightIntensity = 0.8f;
+    [Tooltip("カメラから頭までの距離")]
+    public float cameraDistance = 1.6f;
 
     [Header("投影")]
     [Tooltip("ビルドしたアプリで 2 台目のディスプレイがあれば全画面でそちらに出す")]
@@ -33,9 +41,7 @@ public class SingingStage : MonoBehaviour
     Camera _camera;
     AudioSource _audio;
     Vrm10Instance _vrm;
-    Transform _spine;
-    Transform _head;
-    Quaternion _rootRotation;
+    Vrm10RuntimeControlRig _rig;
     float _mouth;
     float _nextBlink;
     float _blinkTimer = -1f;
@@ -52,13 +58,11 @@ public class SingingStage : MonoBehaviour
         _audio.clip = await LoadWav(Resolve(root, wavPath));
         if (_vrm == null || _audio.clip == null) return;
 
-        var animator = _vrm.GetComponent<Animator>();
-        if (animator != null && animator.isHuman)
+        _rig = _vrm.Runtime.ControlRig;
+        foreach (var light in FindObjectsByType<Light>(FindObjectsSortMode.None))
         {
-            _spine = animator.GetBoneTransform(HumanBodyBones.Spine);
-            _head = animator.GetBoneTransform(HumanBodyBones.Head);
+            if (light.type == LightType.Directional) light.intensity = lightIntensity;
         }
-        _rootRotation = _vrm.transform.rotation;
         FrameCamera();
         _nextBlink = Time.time + 2f;
         _audio.PlayDelayed(startDelaySeconds);
@@ -86,9 +90,10 @@ public class SingingStage : MonoBehaviour
     void FrameCamera()
     {
         // VRM 1.0 のモデルは +Z を向いているので、+Z 側から見る
-        var target = _head != null ? _head.position : _vrm.transform.position + Vector3.up * 1.2f;
-        target.y -= 0.35f;
-        _camera.transform.position = target + new Vector3(0f, 0.05f, 2.4f);
+        var head = _rig?.GetBoneTransform(HumanBodyBones.Head);
+        var target = head != null ? head.position : _vrm.transform.position + Vector3.up * 1.2f;
+        target.y -= 0.25f;
+        _camera.transform.position = target + new Vector3(0f, 0.05f, cameraDistance);
         _camera.transform.LookAt(target);
     }
 
@@ -110,17 +115,28 @@ public class SingingStage : MonoBehaviour
         expression.SetWeight(ExpressionKey.Aa, _mouth);
 
         UpdateBlink(expression);
-
-        var t = Time.time * swaySpeed;
-        _vrm.transform.rotation = _rootRotation * Quaternion.Euler(0f, Mathf.Sin(t * 0.5f) * swayDegrees * 0.5f, 0f);
+        UpdatePose();
     }
 
-    void LateUpdate()
+    /// <summary>
+    /// ControlRig（正規化ボーン：T ポーズで回転ゼロ、軸はモデル空間と同じ）に毎フレーム「絶対値」で姿勢を入れる。
+    /// Vrm10Instance が LateUpdate でこれを元のボーンへ反映する。
+    /// </summary>
+    void UpdatePose()
     {
-        if (_vrm == null) return;
+        if (_rig == null) return;
         var t = Time.time * swaySpeed;
-        if (_spine != null) _spine.localRotation *= Quaternion.Euler(0f, 0f, Mathf.Sin(t) * swayDegrees);
-        if (_head != null) _head.localRotation *= Quaternion.Euler(Mathf.Sin(t * 2f) * swayDegrees * 0.5f * _mouth, 0f, 0f);
+        // モデルは +Z 向き。左腕は -X 側、右腕は +X 側に伸びているので、Z 軸回りに逆向きに回して下ろす
+        SetBone(HumanBodyBones.LeftUpperArm, Quaternion.Euler(0f, 0f, armDownDegrees));
+        SetBone(HumanBodyBones.RightUpperArm, Quaternion.Euler(0f, 0f, -armDownDegrees));
+        SetBone(HumanBodyBones.Spine, Quaternion.Euler(0f, 0f, Mathf.Sin(t) * swayDegrees));
+        SetBone(HumanBodyBones.Head, Quaternion.Euler(Mathf.Sin(t * 2f) * swayDegrees * _mouth, 0f, -Mathf.Sin(t) * swayDegrees * 0.5f));
+    }
+
+    void SetBone(HumanBodyBones bone, Quaternion rotation)
+    {
+        var t = _rig.GetBoneTransform(bone);
+        if (t != null) t.localRotation = rotation;
     }
 
     void UpdateBlink(Vrm10RuntimeExpression expression)
