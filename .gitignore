@@ -23,3 +23,11 @@ output/**/*.mkv
 output/**/*.avi
 output/**/*.wav
 output/**/*.flac
+
+# Third-party avatar model data (license: do not publish model files in this repo)
+avatar/models/*
+!avatar/models/.gitkeep
+*.vrm
+*.pmx
+*.unitypackage
+*.zip
