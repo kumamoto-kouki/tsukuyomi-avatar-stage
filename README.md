@@ -22,4 +22,4 @@ AIアバターを作り、ディスプレイに投影して歌を歌わせるラ
 | `output/` | 録画・切り抜きなどの完成物 |
 | `scripts/` | 自動化スクリプト |
 
-使用ツールは未確定（`docs/` で検討）。
+使用ツールは [docs/tool-selection.md](docs/tool-selection.md) を参照。
