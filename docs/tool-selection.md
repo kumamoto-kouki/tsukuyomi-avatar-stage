@@ -14,12 +14,15 @@
 - 歌詞は `voice/lyrics/`、譜面（MusicXML / MIDI）は `voice/vocal-data/`、書き出した wav は `voice/renders/` に置く。
 
 ### 2. 伴奏・ミックス → `music/`
+- 1 曲目「月夜のステージ」（song01・オリジナル・約 52 秒）：歌詞 `voice/lyrics/song01.txt`、譜面 `voice/vocal-data/song01.musicxml`、歌声 `voice/renders/song01_vocal.wav`、伴奏 `music/instrumentals/song01_inst.wav`、ミックス `music/mix/song01_mix.wav`。伴奏は Python で合成した仮のもの。
 - 最初はオリジナル曲か、ライブで使ってよいフリー伴奏にする。
   - 既存曲のカバーはライブで使うと権利の手続きが必要になることがある。
 - 歌声と伴奏は Audacity などで合わせ、`music/mix/` に置く。
 
 ### 3. アバター → `avatar/`
 - **VRoid Studio** で作成し、**VRM 形式** で書き出す。
+- **現行モデルは暫定**：ずんだもん（人型）3D モデルセット ver.A1 を使用中。将来、**ディフォルメ寄りのモデルに作り直す予定**（公式モデルを素体に改変する場合は権利者 SSS LLC. への問い合わせが必要）。
+  - Unity 側はモデルを差し替えやすくしてある：モデルごとの設定（VRM のパス、腕の角度、カメラ距離、口パク用の表情など）は `stage/unity/Assets/Resources/AvatarProfiles/` の AvatarProfile にまとめている。
 - 配布キャラクター（例：つくよみちゃん）のモデルを使う場合は、商用・ライブ利用が可能な規約か確認する。
 - [ ] キャラクターの利用規約（ライブ配信・商用・改変の可否）を確認し、このフォルダにメモする。
 
@@ -44,4 +47,4 @@
 ## 未決事項
 - [x] 使うキャラクターの配布元と利用規約（ずんだもん（人型）3D モデルセット ver.A1・VN3 ライセンス：非営利のみ、配信・映像利用 OK）
 - [ ] ライブの規模（自宅 / イベント / 配信）
-- [ ] 1 曲目に使う曲
+- [x] 1 曲目に使う曲（仮：song01「月夜のステージ」）
