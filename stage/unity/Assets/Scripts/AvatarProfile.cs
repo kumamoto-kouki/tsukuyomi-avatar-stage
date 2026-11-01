@@ -14,6 +14,9 @@ public class AvatarProfile : ScriptableObject
     [Tooltip("T ポーズから腕を下ろす角度")]
     public float armDownDegrees = 70f;
 
+    [Tooltip("曲に合わせた体の動きの大きさ（頭身の低いモデルは小さめが自然）")]
+    public float motionScale = 1f;
+
     [Header("カメラ・ライト")]
     [Tooltip("カメラから頭までの距離")]
     public float cameraDistance = 1.6f;
@@ -30,6 +33,8 @@ public class AvatarProfile : ScriptableObject
     [Tooltip("口の開きの最大値（モデルの口が開きすぎるなら下げる）")]
     [Range(0f, 1f)] public float mouthMaxWeight = 1f;
     public ExpressionPreset blinkExpression = ExpressionPreset.blink;
+    [Tooltip("曲のセクションで付ける表情（笑顔など）の最大値")]
+    [Range(0f, 1f)] public float emotionMaxWeight = 1f;
 
     public ExpressionKey MouthKey => string.IsNullOrEmpty(customMouthExpression)
         ? ExpressionKey.CreateFromPreset(mouthExpression)

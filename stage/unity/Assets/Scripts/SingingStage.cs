@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using UniVRM10;
@@ -5,22 +6,19 @@ using UnityEngine;
 using UnityEngine.Networking;
 
 /// <summary>
-/// VRM を読み込み、曲を再生して、歌声トラックの音量に合わせて口パクと体の揺れをさせるステージ。
+/// VRM を読み込み、曲を再生して、歌声に合わせた口パク・拍に合わせた動き・セクションごとの表情とカメラを付けるステージ。
 /// モデルと音声はリポジトリ内の avatar/・voice/・music/ から実行時に読み込む（モデルは git 管理外）。
-/// モデルごとの設定は <see cref="AvatarProfile"/> にまとめてある。
+/// モデルごとの設定は <see cref="AvatarProfile"/>、曲ごとの設定は <see cref="SongProfile"/> にまとめてある。
+/// 動かすのは VRM 標準の Humanoid ボーンと標準の表情だけなので、モデルを差し替えてもそのまま使える。
 /// </summary>
 public class SingingStage : MonoBehaviour
 {
-    const string DefaultProfile = "AvatarProfiles/Zundamon2025";
+    const string DefaultAvatar = "AvatarProfiles/Zundamon2025";
+    const string DefaultSong = "SongProfiles/Song01";
 
-    [Header("アバター（未指定なら Resources/" + DefaultProfile + "）")]
+    [Header("アバター・曲（未指定なら Resources の既定）")]
     public AvatarProfile avatar;
-
-    [Header("音声（リポジトリのルートからの相対パス、または絶対パス）")]
-    [Tooltip("スピーカーから流す音（伴奏と歌のミックス）")]
-    public string songWavPath = "music/mix/song01_mix.wav";
-    [Tooltip("口パクの元にする歌声だけの音。空なら再生中の音で口パクする")]
-    public string lipSyncWavPath = "voice/renders/song01_vocal.wav";
+    public SongProfile song;
 
     [Header("口パク")]
     [Tooltip("音量(RMS)をこの倍率で口の開きに変換")]
@@ -29,9 +27,21 @@ public class SingingStage : MonoBehaviour
     public float mouthThreshold = 0.01f;
     [Range(0f, 1f)] public float mouthSmoothing = 0.5f;
 
-    [Header("体の揺れ")]
-    public float swayDegrees = 3f;
-    public float swaySpeed = 1.6f;
+    [Header("拍に合わせた動き（セクションの motion が 1 のときの大きさ）")]
+    [Tooltip("体の上下（メートル）")]
+    public float bounceMeters = 0.015f;
+    [Tooltip("体の左右の揺れ（度）")]
+    public float swayDegrees = 4f;
+    [Tooltip("頭のうなずき（度）")]
+    public float nodDegrees = 5f;
+    [Tooltip("腕の振り（度）")]
+    public float armSwingDegrees = 8f;
+    [Tooltip("ひじの曲げ（度）")]
+    public float elbowBendDegrees = 15f;
+
+    [Header("カメラ")]
+    [Tooltip("カメラが目標へ追いかける速さ")]
+    public float cameraFollowSpeed = 1.5f;
 
     [Header("投影")]
     [Tooltip("ビルドしたアプリで 2 台目のディスプレイがあれば全画面でそちらに出す")]
@@ -41,25 +51,33 @@ public class SingingStage : MonoBehaviour
     const int Window = 1024;
 
     Camera _camera;
+    CameraDirector _director;
     AudioSource _audio;
     Vrm10Instance _vrm;
     Vrm10RuntimeControlRig _rig;
+    Transform _hips;
+    Vector3 _hipsRestPosition;
     ExpressionKey _mouthKey;
     ExpressionKey _blinkKey;
     float[] _lipSamples;
     int _lipChannels;
     int _lipFrequency;
+    float _songTime;
+    float _totalBeats;
+    float _motion;
     float _mouth;
     float _nextBlink;
     float _blinkTimer = -1f;
+    readonly Dictionary<ExpressionPreset, float> _emotions = new();
     readonly float[] _samples = new float[Window];
 
     async void Start()
     {
-        if (avatar == null) avatar = Resources.Load<AvatarProfile>(DefaultProfile);
-        if (avatar == null)
+        if (avatar == null) avatar = Resources.Load<AvatarProfile>(DefaultAvatar);
+        if (song == null) song = Resources.Load<SongProfile>(DefaultSong);
+        if (avatar == null || song == null)
         {
-            Debug.LogError($"AvatarProfile が見つかりません: Resources/{DefaultProfile}");
+            Debug.LogError($"AvatarProfile / SongProfile が見つかりません: Resources/{DefaultAvatar}, Resources/{DefaultSong}");
             return;
         }
         _mouthKey = avatar.MouthKey;
@@ -71,12 +89,13 @@ public class SingingStage : MonoBehaviour
 
         var root = ProjectRoot();
         _vrm = await LoadVrm(Resolve(root, avatar.vrmPath));
-        _audio.clip = await LoadWav(Resolve(root, songWavPath));
+        _audio.clip = await LoadWav(Resolve(root, song.songWavPath));
         if (_vrm == null || _audio.clip == null) return;
+        _totalBeats = song.BeatsAt(_audio.clip.length);
 
-        if (!string.IsNullOrEmpty(lipSyncWavPath))
+        if (!string.IsNullOrEmpty(song.lipSyncWavPath))
         {
-            var lip = await LoadWav(Resolve(root, lipSyncWavPath));
+            var lip = await LoadWav(Resolve(root, song.lipSyncWavPath));
             if (lip != null && lip.GetData(_lipSamples = new float[lip.samples * lip.channels], 0))
             {
                 _lipChannels = lip.channels;
@@ -89,11 +108,17 @@ public class SingingStage : MonoBehaviour
         }
 
         _rig = _vrm.Runtime.ControlRig;
+        _hips = _rig?.GetBoneTransform(HumanBodyBones.Hips);
+        if (_hips != null) _hipsRestPosition = _hips.localPosition;
         foreach (var light in FindObjectsByType<Light>(FindObjectsSortMode.None))
         {
             if (light.type == LightType.Directional) light.intensity = avatar.lightIntensity;
         }
-        FrameCamera();
+
+        var head = _rig?.GetBoneTransform(HumanBodyBones.Head);
+        var headPosition = head != null ? head.position : _vrm.transform.position + Vector3.up * 1.2f;
+        _director = new CameraDirector(_camera, avatar, headPosition);
+
         _nextBlink = Time.time + 2f;
         _audio.PlayDelayed(startDelaySeconds);
     }
@@ -117,21 +142,31 @@ public class SingingStage : MonoBehaviour
         }
     }
 
-    void FrameCamera()
-    {
-        // VRM 1.0 のモデルは +Z を向いているので、+Z 側から見る
-        var head = _rig?.GetBoneTransform(HumanBodyBones.Head);
-        var target = head != null ? head.position : _vrm.transform.position + Vector3.up * 1.2f;
-        target.y -= avatar.cameraTargetBelowHead;
-        _camera.transform.position = target + new Vector3(0f, 0.05f, avatar.cameraDistance);
-        _camera.transform.LookAt(target);
-    }
-
     void Update()
     {
-        if (_vrm == null) return;
-        var expression = _vrm.Runtime.Expression;
+        if (_vrm == null || _director == null) return;
 
+        // 曲の再生位置。始まる前は 0、終わったら最後で止まる
+        if (_audio.isPlaying) _songTime = _audio.time;
+        else if (_songTime > 0f) _songTime = _audio.clip.length;
+        var beat = song.BeatsAt(_songTime);
+        var (section, progress) = song.SectionAt(beat, _totalBeats);
+
+        var k = 1f - Mathf.Exp(-3f * Time.deltaTime);
+        _motion = Mathf.Lerp(_motion, (section?.motion ?? 0f) * avatar.motionScale, k);
+
+        var expression = _vrm.Runtime.Expression;
+        UpdateMouth(expression);
+        var emotion = UpdateEmotion(expression, section, k);
+        UpdateBlink(expression, 1f - emotion);
+        UpdatePose(beat);
+
+        _director.followSpeed = cameraFollowSpeed;
+        _director.Update(section?.camera ?? SongProfile.CameraShot.Wide, progress, Time.time);
+    }
+
+    void UpdateMouth(Vrm10RuntimeExpression expression)
+    {
         var target = 0f;
         if (_audio.isPlaying)
         {
@@ -140,9 +175,24 @@ public class SingingStage : MonoBehaviour
         }
         _mouth = Mathf.Lerp(target, _mouth, mouthSmoothing);
         expression.SetWeight(_mouthKey, _mouth * avatar.mouthMaxWeight);
+    }
 
-        UpdateBlink(expression);
-        UpdatePose();
+    /// <summary>セクションの表情へなめらかに切り替える。いちばん強い表情の重みを返す</summary>
+    float UpdateEmotion(Vrm10RuntimeExpression expression, SongProfile.Section section, float k)
+    {
+        var active = section != null && section.expression != ExpressionPreset.neutral ? section.expression : ExpressionPreset.custom;
+        if (active != ExpressionPreset.custom && !_emotions.ContainsKey(active)) _emotions[active] = 0f;
+
+        var strongest = 0f;
+        foreach (var preset in new List<ExpressionPreset>(_emotions.Keys))
+        {
+            var target = preset == active ? section.expressionWeight * avatar.emotionMaxWeight : 0f;
+            var weight = Mathf.Lerp(_emotions[preset], target, k);
+            _emotions[preset] = weight;
+            expression.SetWeight(ExpressionKey.CreateFromPreset(preset), weight);
+            strongest = Mathf.Max(strongest, weight);
+        }
+        return strongest;
     }
 
     /// <summary>再生位置に対応する歌声トラックの区間の音量</summary>
@@ -167,17 +217,27 @@ public class SingingStage : MonoBehaviour
 
     /// <summary>
     /// ControlRig（正規化ボーン：T ポーズで回転ゼロ、軸はモデル空間と同じ）に毎フレーム「絶対値」で姿勢を入れる。
-    /// Vrm10Instance が LateUpdate でこれを元のボーンへ反映する。
+    /// Vrm10Instance が LateUpdate でこれを元のボーンへ反映する。モデルは +Z 向き。
     /// </summary>
-    void UpdatePose()
+    void UpdatePose(float beat)
     {
         if (_rig == null) return;
-        var t = Time.time * swaySpeed;
-        // モデルは +Z 向き。左腕は -X 側、右腕は +X 側に伸びているので、Z 軸回りに逆向きに回して下ろす
-        SetBone(HumanBodyBones.LeftUpperArm, Quaternion.Euler(0f, 0f, avatar.armDownDegrees));
-        SetBone(HumanBodyBones.RightUpperArm, Quaternion.Euler(0f, 0f, -avatar.armDownDegrees));
-        SetBone(HumanBodyBones.Spine, Quaternion.Euler(0f, 0f, Mathf.Sin(t) * swayDegrees));
-        SetBone(HumanBodyBones.Head, Quaternion.Euler(Mathf.Sin(t * 2f) * swayDegrees * _mouth, 0f, -Mathf.Sin(t) * swayDegrees * 0.5f));
+        var m = _motion;
+        var onBeat = Mathf.Abs(Mathf.Sin(beat * Mathf.PI));   // 1 拍ごとに 0→1→0
+        var side = Mathf.Sin(beat * Mathf.PI);                 // 2 拍で左右に 1 往復
+
+        if (_hips != null) _hips.localPosition = _hipsRestPosition + Vector3.down * (bounceMeters * m * onBeat);
+        SetBone(HumanBodyBones.Spine, Quaternion.Euler(0f, side * swayDegrees * 0.5f * m, side * swayDegrees * m));
+        SetBone(HumanBodyBones.Head, Quaternion.Euler(onBeat * nodDegrees * m, 0f, -side * swayDegrees * 0.5f * m));
+
+        // 左腕は -X 側、右腕は +X 側。Z 軸回りに回して下ろし、X 軸回りに前後へ交互に振る。ひじは前へ曲げる
+        var swing = side * armSwingDegrees * m;
+        var down = avatar.armDownDegrees - onBeat * armSwingDegrees * 0.3f * m;
+        SetBone(HumanBodyBones.LeftUpperArm, Quaternion.Euler(swing, 0f, down));
+        SetBone(HumanBodyBones.RightUpperArm, Quaternion.Euler(-swing, 0f, -down));
+        var elbow = elbowBendDegrees * (0.5f + 0.5f * m);
+        SetBone(HumanBodyBones.LeftLowerArm, Quaternion.Euler(0f, elbow, 0f));
+        SetBone(HumanBodyBones.RightLowerArm, Quaternion.Euler(0f, -elbow, 0f));
     }
 
     void SetBone(HumanBodyBones bone, Quaternion rotation)
@@ -186,14 +246,14 @@ public class SingingStage : MonoBehaviour
         if (t != null) t.localRotation = rotation;
     }
 
-    void UpdateBlink(Vrm10RuntimeExpression expression)
+    void UpdateBlink(Vrm10RuntimeExpression expression, float scale)
     {
         if (_blinkTimer < 0f && Time.time >= _nextBlink) _blinkTimer = 0f;
         if (_blinkTimer < 0f) return;
 
         _blinkTimer += Time.deltaTime;
         const float duration = 0.15f;
-        expression.SetWeight(_blinkKey, Mathf.Sin(Mathf.Clamp01(_blinkTimer / duration) * Mathf.PI));
+        expression.SetWeight(_blinkKey, Mathf.Sin(Mathf.Clamp01(_blinkTimer / duration) * Mathf.PI) * scale);
         if (_blinkTimer >= duration)
         {
             expression.SetWeight(_blinkKey, 0f);
