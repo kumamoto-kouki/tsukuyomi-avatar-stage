@@ -31,3 +31,18 @@ avatar/models/*
 *.pmx
 *.unitypackage
 *.zip
+
+# Unity (stage/unity)
+stage/unity/[Ll]ibrary/
+stage/unity/[Tt]emp/
+stage/unity/[Oo]bj/
+stage/unity/[Ll]ogs/
+stage/unity/[Bb]uild/
+stage/unity/[Bb]uilds/
+stage/unity/[Uu]ser[Ss]ettings/
+stage/unity/MemoryCaptures/
+stage/unity/*.csproj
+stage/unity/*.sln
+stage/unity/*.slnx
+stage/unity/.vs/
+stage/unity/.vsconfig
