@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using UniGLTF;
+using UniGLTF.Utils;
 using UniVRM10;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -107,17 +109,18 @@ public class SingingStage : MonoBehaviour
             }
         }
 
+        FillMissingInitialPose(_vrm);
         _rig = _vrm.Runtime.ControlRig;
         _hips = _rig?.GetBoneTransform(HumanBodyBones.Hips);
         if (_hips != null) _hipsRestPosition = _hips.localPosition;
-        foreach (var light in FindObjectsByType<Light>(FindObjectsSortMode.None))
+        foreach (var light in FindObjectsByType<Light>())
         {
             if (light.type == LightType.Directional) light.intensity = avatar.lightIntensity;
         }
 
         var head = _rig?.GetBoneTransform(HumanBodyBones.Head);
         var headPosition = head != null ? head.position : _vrm.transform.position + Vector3.up * 1.2f;
-        _director = new CameraDirector(_camera, avatar, headPosition);
+        _director = new CameraDirector(_camera, avatar, headPosition, _vrm.transform.position);
 
         _nextBlink = Time.time + 2f;
         _audio.PlayDelayed(startDelaySeconds);
@@ -259,6 +262,35 @@ public class SingingStage : MonoBehaviour
             expression.SetWeight(_blinkKey, 0f);
             _blinkTimer = -1f;
             _nextBlink = Time.time + Random.Range(2f, 5f);
+        }
+    }
+
+    /// <summary>
+    /// 一部のモデル（ずんだもん 2025 など）では、読み込み直後の「初期姿勢」の表にねじれ補助ボーンや揺れもののボーンが入らず、
+    /// UniVRM がコンストレイント処理で KeyNotFoundException を出し続ける（表情・揺れものも止まる）。
+    /// 足りないボーンを読み込み直後（T ポーズ）の姿勢で補い、揺れものを作り直す。
+    /// </summary>
+    static void FillMissingInitialPose(Vrm10Instance vrm)
+    {
+        var added = 0;
+        void Fill(IReadOnlyDictionary<Transform, TransformState> states)
+        {
+            if (states is not Dictionary<Transform, TransformState> dict) return;
+            foreach (var t in vrm.GetComponentsInChildren<Transform>(true))
+            {
+                if (dict.ContainsKey(t)) continue;
+                dict.Add(t, new TransformState(t));
+                added++;
+            }
+        }
+
+        if (vrm.TryGetComponent<RuntimeGltfInstance>(out var gltf)) Fill(gltf.InitialTransformStates);
+        Fill(vrm.DefaultTransformStates);
+        Fill(vrm.Runtime.InitPose);
+        if (added > 0)
+        {
+            vrm.Runtime.SpringBone.ReconstructSpringBone();
+            Debug.Log($"[SingingStage] 初期姿勢に足りなかったボーンを {added} 件補いました");
         }
     }
 

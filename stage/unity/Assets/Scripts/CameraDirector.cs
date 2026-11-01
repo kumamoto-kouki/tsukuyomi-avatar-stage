@@ -9,6 +9,7 @@ public class CameraDirector
     readonly Camera _camera;
     readonly AvatarProfile _avatar;
     readonly Vector3 _head;
+    readonly Vector3 _bodyCenter;
     Vector3 _position;
     Vector3 _lookAt;
     bool _initialized;
@@ -16,11 +17,13 @@ public class CameraDirector
     /// <summary>目標へ追いかける速さ（大きいほどきびきび動く）</summary>
     public float followSpeed = 1.5f;
 
-    public CameraDirector(Camera camera, AvatarProfile avatar, Vector3 headPosition)
+    public CameraDirector(Camera camera, AvatarProfile avatar, Vector3 headPosition, Vector3 footPosition)
     {
         _camera = camera;
         _avatar = avatar;
         _head = headPosition;
+        // 全身ショットで画面の中心にする点（足元と頭の間、少し上寄り）
+        _bodyCenter = Vector3.Lerp(footPosition, headPosition, 0.55f);
     }
 
     public void Update(SongProfile.CameraShot shot, float progress, float time)
@@ -42,37 +45,37 @@ public class CameraDirector
     void Desired(SongProfile.CameraShot shot, float progress, float time, out Vector3 position, out Vector3 lookAt)
     {
         var d = _avatar.cameraDistance;
-        var below = _avatar.cameraTargetBelowHead;
-        float distance, yaw, targetBelow;
+        var face = _head + Vector3.down * _avatar.cameraTargetBelowHead;
+        var t = Smooth(progress);
+        float distance, yaw;
         switch (shot)
         {
             case SongProfile.CameraShot.PushIn:
-                distance = Mathf.Lerp(d * 1.5f, d, Smooth(progress));
+                distance = Mathf.Lerp(d * 1.8f, d, t);
+                lookAt = Vector3.Lerp(_bodyCenter, face, t);
                 yaw = 0f;
-                targetBelow = Mathf.Lerp(below * 2f, below, Smooth(progress));
                 break;
             case SongProfile.CameraShot.Orbit:
-                distance = d * 1.1f;
-                yaw = Mathf.Lerp(-30f, 30f, Smooth(progress));
-                targetBelow = below;
+                distance = d * 1.2f;
+                lookAt = Vector3.Lerp(face, _bodyCenter, 0.3f);
+                yaw = Mathf.Lerp(-30f, 30f, t);
                 break;
             case SongProfile.CameraShot.CloseUp:
                 distance = d * 0.6f;
+                lookAt = _head + Vector3.down * (_avatar.cameraTargetBelowHead * 0.3f);
                 yaw = Mathf.Sin(time * 0.4f) * 8f;
-                targetBelow = below * 0.3f;
                 break;
             case SongProfile.CameraShot.PullBack:
-                distance = Mathf.Lerp(d, d * 2.2f, Smooth(progress));
+                distance = Mathf.Lerp(d, d * 2.0f, t);
+                lookAt = Vector3.Lerp(face, _bodyCenter, t);
                 yaw = 0f;
-                targetBelow = Mathf.Lerp(below, below * 3f, Smooth(progress));
                 break;
             default: // Wide
-                distance = d * 2.2f;
+                distance = d * 2.0f;
+                lookAt = _bodyCenter;
                 yaw = 0f;
-                targetBelow = below * 3f;
                 break;
         }
-        lookAt = _head + Vector3.down * targetBelow;
         position = lookAt + Quaternion.Euler(0f, yaw, 0f) * new Vector3(0f, 0.05f, distance);
     }
 

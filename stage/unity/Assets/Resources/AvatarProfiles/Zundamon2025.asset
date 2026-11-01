@@ -15,7 +15,7 @@ MonoBehaviour:
   vrmPath: "avatar/models/ずんだもん2025モデルセット ver.A1/VRM/Zundamon_2025_VRM10A.vrm"
   armDownDegrees: 70
   cameraDistance: 1.6
-  cameraTargetBelowHead: 0.25
+  cameraTargetBelowHead: 0.15
   lightIntensity: 0.8
   mouthExpression: 6
   customMouthExpression:

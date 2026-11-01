@@ -14,7 +14,8 @@ using UnityEngine;
 ///   play / stop           … Play モードの開始・終了
 ///   open-scene &lt;path&gt;     … シーンを開く（例: Assets/Scenes/Stage.unity）
 ///   build-scene           … Tools/Build Stage Scene と同じ
-///   screenshot [path]     … Game 画面を保存（既定: Logs/claude-screenshot.png、Play 中のみ）
+///   setup                 … プロジェクト設定を整える（Run In Background を有効にし、エディタが裏にあっても Play を止めない）
+///   screenshot [path]     … メインカメラの映像を PNG で保存（既定: Logs/claude-screenshot.png）。Game 画面が非表示でも撮れる
 /// </summary>
 [InitializeOnLoad]
 static class ClaudeCommandBridge
@@ -84,14 +85,47 @@ static class ClaudeCommandBridge
             case "build-scene":
                 StageSceneBuilder.Build();
                 break;
+            case "setup":
+                PlayerSettings.runInBackground = true;
+                AssetDatabase.SaveAssets();
+                Debug.Log("[ClaudeCommand] runInBackground = true");
+                break;
             case "screenshot":
-                var path = string.IsNullOrEmpty(arg) ? Path.Combine("Logs", "claude-screenshot.png") : arg;
-                ScreenCapture.CaptureScreenshot(path);
-                Debug.Log($"[ClaudeCommand] screenshot requested: {Path.GetFullPath(path)}");
+                var path = Path.GetFullPath(string.IsNullOrEmpty(arg) ? Path.Combine("Logs", "claude-screenshot.png") : arg);
+                CaptureCamera(path);
+                Debug.Log($"[ClaudeCommand] screenshot saved: {path}");
                 break;
             default:
                 Debug.LogWarning($"[ClaudeCommand] unknown command: {command}");
                 break;
+        }
+    }
+
+    /// <summary>Game 画面の表示状態に関係なく、メインカメラを RenderTexture に描いて保存する</summary>
+    static void CaptureCamera(string path, int width = 1280, int height = 720)
+    {
+        var camera = Camera.main;
+        if (camera == null) throw new InvalidOperationException("Main Camera がありません");
+        var rt = RenderTexture.GetTemporary(width, height, 24);
+        var previousTarget = camera.targetTexture;
+        var previousActive = RenderTexture.active;
+        try
+        {
+            camera.targetTexture = rt;
+            camera.Render();
+            RenderTexture.active = rt;
+            var tex = new Texture2D(width, height, TextureFormat.RGB24, false);
+            tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+            tex.Apply();
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.WriteAllBytes(path, tex.EncodeToPNG());
+            UnityEngine.Object.DestroyImmediate(tex);
+        }
+        finally
+        {
+            camera.targetTexture = previousTarget;
+            RenderTexture.active = previousActive;
+            RenderTexture.ReleaseTemporary(rt);
         }
     }
 }
